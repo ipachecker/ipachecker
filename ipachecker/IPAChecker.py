@@ -124,6 +124,76 @@ class IPAChecker:
         :param result: Analysis result dictionary containing file info
         :return:      Dictionary with success status and new path or error message
         """
+        return self._rename_file(result, target_filename=result.get("obscuraFilename"))
+
+    def rename_with_template(
+        self, result: Dict[str, Any], template: str
+    ) -> Dict[str, Any]:
+        """
+        Rename an IPA file using a custom filename template.
+
+        Example template:
+            {DisplayName}-({BundleID})-{AppVersion}-(iOS_{MinVersion})-{MD5Hash}-{Architecture}
+
+        Supported placeholders:
+            {DisplayName}, {BundleID}, {AppVersion}, {MinVersion}, {MD5Hash}, {Architecture}
+
+        Notes:
+        - Unknown placeholders will return a failure result.
+        - The resulting filename is sanitized for filesystem safety.
+        - If the final name doesn't end with .ipa, it will be appended.
+        """
+        if not template:
+            return {"success": False, "error": "Template cannot be empty"}
+
+        try:
+            filename = self._render_name_template(result, template)
+        except KeyError as e:
+            return {
+                "success": False,
+                "error": f"Unknown placeholder in template: {e}",
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to render template: {e}"}
+
+        return self._rename_file(result, target_filename=filename)
+
+    def _render_name_template(self, result: Dict[str, Any], template: str) -> str:
+        """
+        Render a rename template into a filename (not a full path).
+        Raises KeyError for unknown placeholders.
+        """
+        values = {
+            # Primary names
+            "DisplayName": result.get("displayName", "Unknown"),
+            "BundleID": result.get("bundleId", "unknown"),
+            "AppVersion": result.get("appVersion", "1.0"),
+            "MinVersion": result.get("minIOS", "2.0"),
+            "MD5Hash": result.get("md5", ""),
+            "Architecture": result.get("architecture", "Unknown"),
+            # Aliase names
+            "displayName": result.get("displayName", "Unknown"),
+            "bundleId": result.get("bundleId", "unknown"),
+            "appVersion": result.get("appVersion", "1.0"),
+            "minIOS": result.get("minIOS", "2.0"),
+            "md5": result.get("md5", ""),
+            "architecture": result.get("architecture", "Unknown"),
+        }
+
+        rendered = template.format_map(values)
+
+        # Ensure extension
+        if not rendered.lower().endswith(".ipa"):
+            rendered += ".ipa"
+
+        return sanitize_filename(rendered)
+
+    def _rename_file(
+        self, result: Dict[str, Any], target_filename: Optional[str]
+    ) -> Dict[str, Any]:
+        """
+        Shared implementation for renaming a local IPA to a specific filename.
+        """
         try:
             if "error" in result:
                 return {
@@ -135,27 +205,26 @@ class IPAChecker:
             if not old_path or not os.path.exists(old_path):
                 return {"success": False, "error": "Original file not found"}
 
-            obscura_filename = result.get("obscuraFilename")
-            if not obscura_filename:
-                return {"success": False, "error": "Obscura filename not generated"}
+            if not target_filename:
+                return {"success": False, "error": "Target filename not generated"}
 
             # Get directory of original file
             directory = os.path.dirname(old_path)
-            new_path = os.path.join(directory, obscura_filename)
+            new_path = os.path.join(directory, target_filename)
 
             # Check if file already has correct name
             if old_path == new_path:
                 return {
                     "success": True,
                     "new_path": new_path,
-                    "message": "File already has obscura format name",
+                    "message": "File already has desired name",
                 }
 
             # Check if target file already exists
             if os.path.exists(new_path):
                 return {
                     "success": False,
-                    "error": f"Target file already exists: {obscura_filename}",
+                    "error": f"Target file already exists: {os.path.basename(new_path)}",
                 }
 
             # Perform the rename
@@ -165,7 +234,9 @@ class IPAChecker:
                 self.console.print(
                     f"[green]Renamed:[/green] {os.path.basename(old_path)}"
                 )
-                self.console.print(f"[green]     To:[/green] {obscura_filename}")
+                self.console.print(
+                    f"[green]     To:[/green] {os.path.basename(new_path)}"
+                )
 
             return {
                 "success": True,
@@ -459,7 +530,7 @@ class IPAChecker:
             version = properties.get("CFBundleVersion", "1.0")
             min_ios = properties.get("MinimumOSVersion", "2.0")
 
-            obscura_filename = (
+            obscura_filename = sanitize_filename(
                 f"{display_name}-({bundle_id})-{version}-(iOS_{min_ios})-{md5_hash}.ipa"
             )
 
@@ -510,19 +581,27 @@ class IPAChecker:
         """Check if the Mach-O binary is encrypted."""
         try:
             macho = macholib.MachO.MachO(filename)
+            saw_cryptid = False
             for header in macho.headers:
                 load_commands = header.commands
                 for load_command in load_commands:
-                    if isinstance(
-                        load_command[1], macholib.mach_o.encryption_info_command
-                    ):
-                        if load_command[1].cryptid == 0:
-                            return False
-                    if isinstance(
-                        load_command[1], macholib.mach_o.encryption_info_command_64
-                    ):
-                        if load_command[1].cryptid == 0:
-                            return False
+                    cmd = load_command[1]
+
+                    # Both real macholib command objects and test mocks
+                    # expose a `cryptid` attribute.
+                    cryptid = getattr(cmd, "cryptid", None)
+                    if cryptid is None:
+                        continue
+
+                    saw_cryptid = True
+                    if cryptid == 0:
+                        return False
+
+            # If we saw any cryptid values and none were 0, we treat as encrypted.
+            if saw_cryptid:
+                return True
+
+            # If we couldn't determine, we assume encrypted.
             return True
         except Exception:
             return True  # Assume encrypted if we can't determine

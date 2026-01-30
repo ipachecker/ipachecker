@@ -75,13 +75,20 @@ def create_mock_ipa_file(path, app_name="TestApp", encrypted=True, universal=Fal
         # Create mock app structure
         app_dir = f"Payload/{app_name}.app/"
 
+        # Create mock executable name used by tests/mocks
+        exec_name = app_name
+        if encrypted:
+            exec_name += "_encrypted"
+        if universal:
+            exec_name += "_universal"
+
         # Create Info.plist
         info_plist = {
             "CFBundleName": app_name,
             "CFBundleDisplayName": f"{app_name} Display",
             "CFBundleIdentifier": f"com.test.{app_name.lower()}",
             "CFBundleVersion": "1.0.0",
-            "CFBundleExecutable": app_name,
+            "CFBundleExecutable": exec_name,
             "MinimumOSVersion": "12.0",
         }
 
@@ -89,13 +96,7 @@ def create_mock_ipa_file(path, app_name="TestApp", encrypted=True, universal=Fal
         zip_file.writestr(f"{app_dir}Info.plist", plist_data)
 
         # Create mock executable
-        exec_name = app_name
-        if encrypted:
-            exec_name += "_encrypted"
-        if universal:
-            exec_name += "_universal"
-
-        zip_file.writestr(f"{app_dir}{app_name}", b"mock_executable_data")
+        zip_file.writestr(f"{app_dir}{exec_name}", b"mock_executable_data")
 
 
 @patch("ipachecker.IPAChecker.macholib.MachO.MachO", MockMachO)
@@ -433,6 +434,79 @@ class IPACheckerTests(unittest.TestCase):
         # Should be a 32-character hex string
         self.assertEqual(len(result), 32)
         self.assertTrue(all(c in "0123456789abcdef" for c in result))
+
+    def test_render_custom_name_template_success(self):
+        # Create test IPA file
+        test_ipa = os.path.join(self.test_dir, "test.ipa")
+        create_mock_ipa_file(test_ipa, "TestApp", encrypted=False)
+
+        result = self.checker.check_ipa(test_ipa)
+        self.assertNotIn("error", result)
+
+        template = "{DisplayName}-({BundleID})-{AppVersion}-(iOS_{MinVersion})-{MD5Hash}-{Architecture}"
+        rendered = self.checker._render_name_template(result, template)
+
+        self.assertTrue(rendered.lower().endswith(".ipa"))
+        self.assertIn("TestApp Display", rendered)
+        self.assertIn("com.test.testapp", rendered)
+        self.assertIn("1.0.0", rendered)
+        self.assertIn("iOS_12.0", rendered)
+        self.assertIn(result["md5"], rendered)
+        self.assertIn(result["architecture"], rendered)
+
+    def test_render_custom_name_template_unknown_placeholder(self):
+        test_ipa = os.path.join(self.test_dir, "test.ipa")
+        create_mock_ipa_file(test_ipa, "TestApp", encrypted=False)
+
+        result = self.checker.check_ipa(test_ipa)
+        self.assertNotIn("error", result)
+
+        with self.assertRaises(KeyError):
+            self.checker._render_name_template(result, "{Nope}")
+
+    def test_rename_with_template_success(self):
+        test_ipa = os.path.join(self.test_dir, "rename_me.ipa")
+        create_mock_ipa_file(test_ipa, "RenameApp", encrypted=False)
+
+        result = self.checker.check_ipa(test_ipa)
+        self.assertNotIn("error", result)
+
+        template = "{DisplayName}-({BundleID})-{AppVersion}-{Architecture}-{MD5Hash}"
+        rename_result = self.checker.rename_with_template(result, template)
+
+        self.assertTrue(rename_result["success"])
+        self.assertTrue(os.path.exists(rename_result["new_path"]))
+        self.assertFalse(os.path.exists(rename_result["old_path"]))
+
+    def test_rename_with_template_target_exists(self):
+        test_ipa = os.path.join(self.test_dir, "rename_me.ipa")
+        create_mock_ipa_file(test_ipa, "RenameApp", encrypted=False)
+
+        result = self.checker.check_ipa(test_ipa)
+        self.assertNotIn("error", result)
+
+        template = "{DisplayName}-({BundleID})-{AppVersion}-{Architecture}-{MD5Hash}"
+        rendered = self.checker._render_name_template(result, template)
+        target_path = os.path.join(os.path.dirname(result["filePath"]), rendered)
+
+        # Create a dummy file to force collision
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write("collision")
+
+        rename_result = self.checker.rename_with_template(result, template)
+        self.assertFalse(rename_result["success"])
+        self.assertIn("already exists", rename_result["error"])
+
+    def test_rename_to_obscura_success(self):
+        test_ipa = os.path.join(self.test_dir, "rename_me.ipa")
+        create_mock_ipa_file(test_ipa, "ObscuraApp", encrypted=False)
+
+        result = self.checker.check_ipa(test_ipa)
+        self.assertNotIn("error", result)
+
+        rename_result = self.checker.rename_to_obscura(result)
+        self.assertTrue(rename_result["success"])
+        self.assertTrue(os.path.exists(rename_result["new_path"]))
 
     def test_print_result_table(self):
         # Test that print methods don't crash (output testing is complex)

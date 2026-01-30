@@ -46,11 +46,7 @@ class UtilsTest(unittest.TestCase):
 
         for url in invalid_urls:
             with self.subTest(url=url):
-                if url is None:
-                    with self.assertRaises(AttributeError):
-                        is_valid_url(url)
-                else:
-                    self.assertFalse(is_valid_url(url))
+                self.assertFalse(is_valid_url(url))
 
     def test_sanitize_filename_with_valid_names(self):
         valid_names = [
@@ -304,6 +300,13 @@ class UtilsTest(unittest.TestCase):
 
         self.assertIsNone(result)
 
+    def test_get_latest_pypi_version_invalid_package_name(self):
+        # Invalid package names should be rejected without making a network call
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            result = get_latest_pypi_version("bad/name")
+            self.assertIsNone(result)
+            mock_urlopen.assert_not_called()
+
     def test_get_latest_pypi_version_custom_package(self):
         # Test with custom package name
         with patch("urllib.request.urlopen") as mock_urlopen:
@@ -318,7 +321,8 @@ class UtilsTest(unittest.TestCase):
             self.assertEqual(result, "1.5.0")
             # Verify correct URL was called
             called_url = mock_urlopen.call_args[0][0]
-            self.assertIn("custom-package", called_url.url)
+            # urlopen is called with a URL string in this implementation
+            self.assertIn("custom-package", called_url)
 
     def test_dict_to_xml_simple_dict(self):
         # Test simple dictionary conversion

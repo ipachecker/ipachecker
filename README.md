@@ -16,7 +16,7 @@
 
 IPAchecker is a python tool for analyzing iOS IPA files, It extracts metadata, checks encryption status, determines architecture, and provides detailed information about iOS applications, The tool supports both local path analysis and direct downloads from URLs (using curl), with batch processing for analyzing multiple ipas
 
-> Python script provided by norep on discord, credits to him
+> Python script was provided by norep on discord, credits to him
 
 ## Features
 
@@ -46,8 +46,8 @@ The package creates a console script named `ipachecker` once installed, You can 
 ## Usage
 
 ```bash
-ipachecker <input>... [--output <output>] [--json | --xml] [--quiet] [--debug] [--dont-delete] [--rename]
-ipachecker --batch-analysis <path> [--output <output>] [--json | --xml] [--quiet] [--debug] [--dont-delete] [--rename]
+ipachecker <input>... [--output <output>] [--json | --xml] [--quiet] [--debug] [--dont-delete] [--rename] [--name <template>]
+ipachecker --batch-analysis <path> [--output <output>] [--json | --xml] [--quiet] [--debug] [--dont-delete] [--rename] [--name <template>]
 ```
 
 ### Arguments
@@ -65,6 +65,7 @@ ipachecker --batch-analysis <path> [--output <output>] [--json | --xml] [--quiet
 - `-d, --debug` – Print all logs to stdout for troubleshooting
 - `--dont-delete` – Don't delete downloaded files after analysis
 - `--rename` – Rename IPA files to obscura filename format after analysis
+- `-n, --name <template>` – Custom rename template (implies `--rename`)
 - `--batch-analysis` – Enable batch analysis mode for multiple files
 
 ### Examples
@@ -133,6 +134,27 @@ The `--rename` flag automatically renames analyzed IPA files to the standardized
 ```
 {DisplayName}-({BundleID})-{AppVersion}-(iOS_{MinVersion})-{MD5Hash}.ipa
 ```
+
+### Custom naming schemes
+
+Use `--name` to supply your own naming template (this implies `--rename`):
+
+```bash
+ipachecker app.ipa --name "{DisplayName}-({BundleID})-{AppVersion}-(iOS_{MinVersion})-{MD5Hash}-{Architecture}"
+```
+
+**Supported placeholders:**
+- `{DisplayName}`: App display name
+- `{BundleID}`: Bundle identifier
+- `{AppVersion}`: App version
+- `{MinVersion}`: Minimum iOS version
+- `{MD5Hash}`: IPA MD5 hash
+- `{Architecture}`: `32-bit`, `64-bit`, or `Universal`
+
+**Notes:**
+- Quote the template in your shell to avoid interpretation.
+- If the template result does not end with `.ipa`, it will be appended automatically.
+- Output filenames are sanitized for filesystem safety and will not overwrite existing files.
 
 **Key behaviors:**
 - Only renames local files (not downloaded files, unless used with `--dont-delete`)

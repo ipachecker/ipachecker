@@ -5,8 +5,8 @@
 """ipachecker - Analyze iOS IPA files for metadata and encryption status.
 
 Usage:
-  ipachecker <input>... [--output <output>] [--json | --xml] [--quiet] [--debug] [--dont-delete] [--rename]
-  ipachecker --batch-analysis <path> [--output <output>] [--json | --xml] [--quiet] [--debug] [--dont-delete] [--rename]
+  ipachecker <input>... [--output <output>] [--json | --xml] [--quiet] [--debug] [--dont-delete] [--rename] [--name <template>]
+  ipachecker --batch-analysis <path> [--output <output>] [--json | --xml] [--quiet] [--debug] [--dont-delete] [--rename] [--name <template>]
   ipachecker -h | --help
   ipachecker --version
 
@@ -24,6 +24,7 @@ Options:
   -d --debug                  Print all logs to stdout
   --dont-delete               Don't delete downloaded files after analysis
   --rename                    Rename IPA files to obscura filename format after analysis
+  -n --name <template>        Custom rename template (implies --rename), Placeholders: {DisplayName}, {BundleID}, {AppVersion}, {MinVersion}, {MD5Hash}, {Architecture}
   --batch-analysis            Enable batch analysis mode for multiple files or URLs
 """
 
@@ -141,6 +142,11 @@ def main():
     dont_delete = args["--dont-delete"]
     batch_analysis = args["--batch-analysis"]
     rename_files = args["--rename"]
+    name_template = args["--name"]
+
+    # If a template is provided, it implies renaming.
+    if name_template:
+        rename_files = True
 
     if debug_mode:
         # Display log messages.
@@ -189,13 +195,21 @@ def main():
 
             # Handle renaming for batch results
             if rename_files and not quiet_mode:
-                print("\n:: Renaming files to obscura format...")
+                if name_template:
+                    print("\n:: Renaming files to custom format...")
+                else:
+                    print("\n:: Renaming files to obscura format...")
                 renamed_count = 0
                 for result in results:
                     if "error" not in result and not result.get("_metadata", {}).get(
                         "was_downloaded", False
                     ):
-                        rename_result = checker.rename_to_obscura(result)
+                        if name_template:
+                            rename_result = checker.rename_with_template(
+                                result, name_template
+                            )
+                        else:
+                            rename_result = checker.rename_to_obscura(result)
                         if rename_result["success"]:
                             renamed_count += 1
                             print(
@@ -272,7 +286,12 @@ def main():
                         "was_downloaded", False
                     )
                     if not was_downloaded:
-                        rename_result = checker.rename_to_obscura(result)
+                        if name_template:
+                            rename_result = checker.rename_with_template(
+                                result, name_template
+                            )
+                        else:
+                            rename_result = checker.rename_to_obscura(result)
                         if rename_result["success"]:
                             if not quiet_mode:
                                 print(
